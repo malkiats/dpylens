@@ -15,114 +15,104 @@ class FunctionDataFlow:
     outputs: list[str]
 
 
-def _is_open_with_mode(call: ast.Call, modes: set[str]) -> bool:
-    # open("x", "r") or open("x", mode="r")
-    if not isinstance(call.func, ast.Name) or call.func.id != "open":
-        return False
-
-    # positional mode argument
-    if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant) and isinstance(call.args[1].value, str):
-        return call.args[1].value in modes
-
-    # keyword mode argument
-    for kw in call.keywords or []:
-        if kw.arg == "mode" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-            return kw.value.value in modes
-
-    return False
+# Backwards-compat alias if anything imported DataflowRecord (from the brief replacement)
+DataflowRecord = FunctionDataFlow
 
 
-def _call_name(node: ast.Call) -> str:
-    fn = node.func
-    if isinstance(fn, ast.Name):
-        return fn.id
-    if isinstance(fn, ast.Attribute):
-        return fn.attr
-    return "<unknown>"
+class DataflowVisitor(ast.NodeVisitor):
+    """
+    Heuristic dataflow extractor. Must never crash analysis.
+    Uses a stack to correctly handle nested function definitions.
+    """
 
-
-class DataFlowVisitor(ast.NodeVisitor):
     def __init__(self, file_path: Path, module_name: str):
         self.file_path = file_path
         self.module_name = module_name
-        self.results: list[FunctionDataFlow] = []
-        self._current_func: str | None = None
-        self._current_lineno: int = 0
-        self._inputs: set[str] = set()
-        self._outputs: set[str] = set()
-        self._transforms: list[str] = []
+        self.records: list[FunctionDataFlow] = []
+        self._stack: list[dict] = []
+
+    def _start_function(self, name: str, lineno: int, args: ast.arguments) -> None:
+        params: list[str] = []
+        for a in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs):
+            if getattr(a, "arg", None):
+                params.append(a.arg)
+        if args.vararg and args.vararg.arg:
+            params.append(args.vararg.arg)
+        if args.kwarg and args.kwarg.arg:
+            params.append(args.kwarg.arg)
+
+        self._stack.append(
+            {
+                "function": f"{self.module_name}.{name}",
+                "lineno": lineno,
+                "inputs": set(params),
+                "transforms": [],
+                "outputs": set(),
+            }
+        )
+
+    def _finish_function(self) -> None:
+        if not self._stack:
+            return
+        cur = self._stack.pop()
+        self.records.append(
+            FunctionDataFlow(
+                function=cur["function"],
+                file=str(self.file_path),
+                lineno=int(cur["lineno"] or 0),
+                inputs=sorted(cur["inputs"]),
+                transforms=list(cur["transforms"]),
+                outputs=sorted(cur["outputs"]),
+            )
+        )
+
+    def _cur(self) -> dict | None:
+        return self._stack[-1] if self._stack else None
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._start_function(node.name, node.lineno)
+        self._start_function(node.name, getattr(node, "lineno", 0) or 0, node.args)
         self.generic_visit(node)
         self._finish_function()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._start_function(node.name, node.lineno)
+        self._start_function(node.name, getattr(node, "lineno", 0) or 0, node.args)
         self.generic_visit(node)
         self._finish_function()
 
-    def _start_function(self, name: str, lineno: int) -> None:
-        self._current_func = f"{self.module_name}.{name}"
-        self._current_lineno = lineno
-        self._inputs = set()
-        self._outputs = set()
-        self._transforms = []
-
-    def _finish_function(self) -> None:
-        assert self._current_func is not None
-        self.results.append(
-            FunctionDataFlow(
-                function=self._current_func,
-                file=str(self.file_path),
-                lineno=self._current_lineno,
-                inputs=sorted(self._inputs),
-                transforms=self._transforms,
-                outputs=sorted(self._outputs),
-            )
-        )
-        self._current_func = None
-
     def visit_Call(self, node: ast.Call) -> None:
-        if not self._current_func:
-            return
+        cur = self._cur()
+        if cur is not None:
+            fn = node.func
+            if isinstance(fn, ast.Name):
+                cur["transforms"].append(fn.id)
+            elif isinstance(fn, ast.Attribute):
+                cur["transforms"].append(fn.attr)
 
-        name = _call_name(node)
+            # crude env access signal
+            if isinstance(fn, ast.Attribute) and fn.attr in {"get", "getenv"}:
+                cur["inputs"].add("env:*")
 
-        # INPUTS
-        if isinstance(node.func, ast.Name) and node.func.id == "input":
-            self._inputs.add("stdin:input()")
+        self.generic_visit(node)
 
-        # env reads: os.getenv("X")
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "getenv":
-            self._inputs.add("env:os.getenv")
+    def visit_Return(self, node: ast.Return) -> None:
+        cur = self._cur()
+        if cur is not None:
+            cur["outputs"].add("return")
+        self.generic_visit(node)
 
-        # file read/write via open
-        if _is_open_with_mode(node, {"r", "rt", "rb"}):
-            self._inputs.add("file:open(read)")
-        if _is_open_with_mode(node, {"w", "wt", "wb", "a", "at", "ab"}):
-            self._outputs.add("file:open(write)")
-
-        # OUTPUTS
-        if isinstance(node.func, ast.Name) and node.func.id == "print":
-            self._outputs.add("stdout:print()")
-
-        # subprocess usage
-        if isinstance(node.func, ast.Attribute) and node.func.attr in {"run", "Popen"}:
-            self._outputs.add("subprocess:exec")
-
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "system":
-            self._outputs.add("subprocess:os.system")
-
-        # TRANSFORMS (simple “steps list”)
-        # Keep it simple: record every call name except very common IO ones
-        if name not in {"print", "input", "open"}:
-            self._transforms.append(name)
-
+    def visit_Assign(self, node: ast.Assign) -> None:
+        cur = self._cur()
+        if cur is not None:
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id.isupper():
+                    cur["outputs"].add(t.id)
         self.generic_visit(node)
 
 
 def extract_dataflow(tree: ast.AST, file_path: Path, module_name: str) -> list[FunctionDataFlow]:
-    v = DataFlowVisitor(file_path=file_path, module_name=module_name)
-    v.visit(tree)
-    return v.results
+    v = DataflowVisitor(file_path=file_path, module_name=module_name)
+    try:
+        v.visit(tree)
+    except Exception:
+        return []
+    return v.records

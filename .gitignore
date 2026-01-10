@@ -37,3 +37,6 @@ pytestdebug.log
 
 # Generated analysis output (dpylens artifacts)
 analysis/
+
+# Reports
+report/
