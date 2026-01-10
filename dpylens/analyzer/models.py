@@ -11,12 +11,6 @@ class FileError:
 
 
 @dataclass(frozen=True)
-class ImportRecord:
-    file: str
-    imports: list[str]
-
-
-@dataclass(frozen=True)
 class FunctionRecord:
     qualname: str
     file: str

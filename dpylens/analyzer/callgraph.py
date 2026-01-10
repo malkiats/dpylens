@@ -10,16 +10,32 @@ def _callee_name(call: ast.Call) -> str:
     """
     Convert an ast.Call to a readable callee name.
 
-    MVP rules:
+    MVP+:
     - foo() -> "foo"
-    - obj.method() -> "*.method" (unknown receiver)
-    - nested like pkg.mod.fn() -> "*.fn"
+    - obj.method() -> "obj.method" if obj is a simple name
+    - pkg.mod.fn() -> "<expr>.fn" (we keep attribute chain as best we can)
     """
     fn = call.func
+
     if isinstance(fn, ast.Name):
         return fn.id
+
     if isinstance(fn, ast.Attribute):
-        return f"*.{fn.attr}"
+        # Try to reconstruct "a.b.c" where possible
+        parts: list[str] = [fn.attr]
+        cur = fn.value
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+            parts.reverse()
+            return ".".join(parts)
+
+        # Unknown receiver expression
+        parts.reverse()
+        return "<expr>." + ".".join(parts)
+
     return "<unknown>"
 
 
@@ -29,7 +45,7 @@ class CallGraphVisitor(ast.NodeVisitor):
         self.module_name = module_name
         self.functions: list[FunctionRecord] = []
         self.calls: list[CallRecord] = []
-        self._stack: list[str] = []  # current function qualname stack
+        self._stack: list[str] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         qual = f"{self.module_name}.{node.name}"
@@ -50,9 +66,7 @@ class CallGraphVisitor(ast.NodeVisitor):
             caller = self._stack[-1]
             callee = _callee_name(node)
             lineno = getattr(node, "lineno", 0) or 0
-            self.calls.append(
-                CallRecord(caller=caller, callee=callee, file=str(self.file_path), lineno=lineno)
-            )
+            self.calls.append(CallRecord(caller=caller, callee=callee, file=str(self.file_path), lineno=lineno))
         self.generic_visit(node)
 
 

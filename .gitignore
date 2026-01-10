@@ -1,5 +1,39 @@
-.venv/
+# Python bytecode
 __pycache__/
-.git/
-build/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
 venv/
+ENV/
+env/
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test/coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+pytestdebug.log
+
+# Type checker / linters
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Generated analysis output (dpylens artifacts)
+analysis/

@@ -14,3 +14,9 @@ dpylens = "dpylens.cli:main"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "analysis*", ".venv*", "dpylens.egg-info*"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 
-from dpylens.analyzer.models import CallRecord, ImportRecord
+from dpylens.analyzer.imports import ImportRecord
+from dpylens.analyzer.models import CallRecord
 
 
 def write_text(path: Path, text: str) -> None:
@@ -18,7 +18,7 @@ def _dot_escape(s: str) -> str:
 def build_imports_dot(imports: list[ImportRecord]) -> str:
     """
     DOT graph:
-      file -> imported_module
+      file -> imported_module (flattened base modules)
     """
     lines = [
         "digraph imports {",
@@ -35,10 +35,6 @@ def build_imports_dot(imports: list[ImportRecord]) -> str:
 
 
 def build_callgraph_dot(calls: list[CallRecord]) -> str:
-    """
-    DOT graph:
-      caller -> callee
-    """
     lines = [
         "digraph callgraph {",
         '  rankdir="LR";',
@@ -53,10 +49,8 @@ def build_callgraph_dot(calls: list[CallRecord]) -> str:
 
 
 def build_callgraph_grouped_dot(calls: list[CallRecord]) -> str:
-    """
-    Optional nicer DOT:
-    group by file using subgraphs (clusters)
-    """
+    from collections import defaultdict
+
     by_file: dict[str, list[CallRecord]] = defaultdict(list)
     for c in calls:
         by_file[c.file].append(c)
@@ -67,13 +61,11 @@ def build_callgraph_grouped_dot(calls: list[CallRecord]) -> str:
         '  node [shape="ellipse", fontsize=10];',
     ]
 
-    # clusters
     for idx, (file, edges) in enumerate(sorted(by_file.items(), key=lambda x: x[0])):
         file_esc = _dot_escape(file)
         lines.append(f'  subgraph cluster_{idx} {{')
         lines.append(f'    label="{file_esc}";')
         lines.append('    style="rounded";')
-        # add edges (Graphviz will auto-create nodes)
         for c in edges:
             caller = _dot_escape(c.caller)
             callee = _dot_escape(c.callee)
