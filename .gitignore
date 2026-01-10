@@ -18,9 +18,10 @@ dist/
 # Test/coverage artifacts
 .pytest_cache/
 .coverage
-htmlcov/
 .coverage.*
+htmlcov/
 pytestdebug.log
+.tox/
 
 # Type checker / linters
 .mypy_cache/
@@ -34,37 +35,23 @@ pytestdebug.log
 
 # OS
 .DS_Store
-.idea/
-.vscode/
 
-# Generated analysis output (dpylens artifacts)
-analysis/
-
-# Reports
-report/
-
+# Node / frontend
 node_modules/
-
-# --- dpylens web ---
 web/node_modules/
 web/dist/
 web/.vite/
 web/.env
 web/.env.local
 
-# --- dpylens API run artifacts ---
-.dpylens-server/
-api/.venv/
-api/__pycache__/
+# dpylens artifacts (generated outputs)
+analysis/
+report/
+.dpylens-analysis/
+.dpylens-report/
 
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.tox/
-.venv/
-venv/
-env/
+# dpylens API run artifacts (cloned repos + generated bundles)
+.dpylens-server/
+
+# api python cache (redundant if __pycache__/ is present, but explicit is ok)
+api/__pycache__/
