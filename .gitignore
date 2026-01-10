@@ -34,9 +34,37 @@ pytestdebug.log
 
 # OS
 .DS_Store
+.idea/
+.vscode/
 
 # Generated analysis output (dpylens artifacts)
 analysis/
 
 # Reports
 report/
+
+node_modules/
+
+# --- dpylens web ---
+web/node_modules/
+web/dist/
+web/.vite/
+web/.env
+web/.env.local
+
+# --- dpylens API run artifacts ---
+.dpylens-server/
+api/.venv/
+api/__pycache__/
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.venv/
+venv/
+env/
