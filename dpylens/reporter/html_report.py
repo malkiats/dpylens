@@ -18,6 +18,7 @@ DEFAULT_JSON_FILES = [
     "callgraph_resolved.json",
     "patterns.json",
     "dataflow.json",
+    "routes.json",
 ]
 
 DEFAULT_IMAGE_FILES = [
@@ -91,7 +92,6 @@ _INDEX_HTML = r"""<!doctype html>
       overflow-x: hidden;
     }
 
-    /* Subtle circuit overlay */
     .bg-overlay {
       position: fixed;
       inset: 0;
@@ -195,7 +195,6 @@ _INDEX_HTML = r"""<!doctype html>
     }
     .muted { color: var(--muted); }
 
-    /* Overview stats */
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -225,7 +224,6 @@ _INDEX_HTML = r"""<!doctype html>
     .pill.ok { background: var(--ok-bg); color: var(--ok); border-color: rgba(34,197,94,0.25); }
     .pill.warn { background: var(--warn-bg); color: var(--warn); border-color: rgba(245,158,11,0.28); }
 
-    /* Graph thumbs */
     .graph-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -259,7 +257,6 @@ _INDEX_HTML = r"""<!doctype html>
       text-overflow: ellipsis;
     }
 
-    /* Explorer layout */
     .explorer {
       display: grid;
       grid-template-columns: 360px 1fr;
@@ -291,13 +288,10 @@ _INDEX_HTML = r"""<!doctype html>
       background: rgba(10,10,10,0.60);
       backdrop-filter: blur(10px);
     }
-    @media (max-width: 1100px) {
-      .sidebar-header { top: 56px; }
-    }
 
     .tabs {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 8px;
       margin-bottom: 10px;
     }
@@ -374,7 +368,6 @@ _INDEX_HTML = r"""<!doctype html>
       min-width: 0;
     }
 
-    /* Prevent tables/long code from overflowing cards */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -426,7 +419,7 @@ _INDEX_HTML = r"""<!doctype html>
       color: var(--muted);
     }
 
-    /* Image modal */
+    /* Modal with zoom/pan */
     .modal {
       position: fixed;
       inset: 0;
@@ -543,15 +536,16 @@ _INDEX_HTML = r"""<!doctype html>
           <div class="tabs">
             <div id="tabFiles" class="tab active">Files</div>
             <div id="tabFunctions" class="tab">Functions</div>
+            <div id="tabRoutes" class="tab">Routes</div>
           </div>
-          <input id="globalSearch" class="search mono" placeholder="Search files/functions..." />
+          <input id="globalSearch" class="search mono" placeholder="Search..." />
         </div>
         <div id="masterList" class="list"></div>
       </div>
 
       <div class="detail">
         <div id="details" class="muted" style="padding: 8px;">
-          Select a file or function to view details.
+          Select a file, function, or route to view details.
         </div>
       </div>
     </div>
@@ -600,7 +594,7 @@ function el(tag, attrs={}, children=[]) {
 
 function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
-// --- Modal zoom/pan state ---
+// --- Modal zoom/pan ---
 const modal = document.getElementById("imgModal");
 const modalImg = document.getElementById("imgModalImg");
 const modalTitle = document.getElementById("imgModalTitle");
@@ -624,27 +618,17 @@ function applyTransform() {
   modalImg.style.transform =
     `translate(-50%, -50%) translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`;
 }
-
-function resetView() {
-  state.scale = 1;
-  state.tx = 0;
-  state.ty = 0;
-  applyTransform();
-}
-
+function resetView() { state.scale = 1; state.tx = 0; state.ty = 0; applyTransform(); }
 function fitToView() {
   const vw = viewport.clientWidth;
   const vh = viewport.clientHeight;
   const iw = modalImg.naturalWidth || 1;
   const ih = modalImg.naturalHeight || 1;
-
   const scale = Math.min(vw / iw, vh / ih);
   state.scale = Math.max(state.minScale, Math.min(scale, state.maxScale));
-  state.tx = 0;
-  state.ty = 0;
+  state.tx = 0; state.ty = 0;
   applyTransform();
 }
-
 function zoomAt(factor, anchorX = viewport.clientWidth / 2, anchorY = viewport.clientHeight / 2) {
   const next = Math.max(state.minScale, Math.min(state.scale * factor, state.maxScale));
   const actualFactor = next / state.scale;
@@ -655,19 +639,13 @@ function zoomAt(factor, anchorX = viewport.clientWidth / 2, anchorY = viewport.c
   state.scale = next;
   applyTransform();
 }
-
 function openImg(title, src) {
   modalTitle.textContent = title;
   modalImg.src = src;
-
   state.open = true;
   modal.classList.add("open");
-
-  modalImg.onload = () => {
-    fitToView();
-  };
+  modalImg.onload = () => fitToView();
 }
-
 function closeImg() {
   state.open = false;
   state.dragging = false;
@@ -675,38 +653,25 @@ function closeImg() {
   modalImg.src = "";
 }
 
-// Buttons
 document.getElementById("imgModalClose").addEventListener("click", closeImg);
 document.getElementById("imgReset").addEventListener("click", resetView);
 document.getElementById("imgFit").addEventListener("click", fitToView);
 document.getElementById("imgZoomIn").addEventListener("click", () => zoomAt(1.15));
 document.getElementById("imgZoomOut").addEventListener("click", () => zoomAt(1 / 1.15));
 
-// Click outside closes
-modal.addEventListener("click", (e) => {
-  if (e.target.id === "imgModal") closeImg();
-});
+modal.addEventListener("click", (e) => { if (e.target.id === "imgModal") closeImg(); });
+document.addEventListener("keydown", (e) => { if (state.open && e.key === "Escape") closeImg(); });
 
-// ESC closes
-document.addEventListener("keydown", (e) => {
-  if (!state.open) return;
-  if (e.key === "Escape") closeImg();
-});
-
-// Wheel zoom (trackpad/mouse)
 viewport.addEventListener("wheel", (e) => {
   if (!state.open) return;
   e.preventDefault();
-
   const rect = viewport.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-
   const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
   zoomAt(factor, x, y);
 }, { passive: false });
 
-// Drag to pan
 viewport.addEventListener("mousedown", (e) => {
   if (!state.open) return;
   state.dragging = true;
@@ -715,25 +680,23 @@ viewport.addEventListener("mousedown", (e) => {
   state.dragOrigTx = state.tx;
   state.dragOrigTy = state.ty;
 });
-
 document.addEventListener("mousemove", (e) => {
   if (!state.open || !state.dragging) return;
   state.tx = state.dragOrigTx + (e.clientX - state.dragStartX);
   state.ty = state.dragOrigTy + (e.clientY - state.dragStartY);
   applyTransform();
 });
+document.addEventListener("mouseup", () => { state.dragging = false; });
 
-document.addEventListener("mouseup", () => {
-  state.dragging = false;
-});
-
-function renderOverview({modules, moduleGraph, callgraph, patterns, dataflow}) {
+// --- Overview/Graphs ---
+function renderOverview({modules, moduleGraph, callgraph, patterns, dataflow, routes}) {
   const errs =
     (modules.errors || []).length +
     (moduleGraph.errors || []).length +
     (callgraph.errors || []).length +
     (patterns.errors || []).length +
-    (dataflow.errors || []).length;
+    (dataflow.errors || []).length +
+    (routes?.warnings || []).length;
 
   const pill = errs
     ? el("span", {class: "pill warn"}, [`Warnings: ${errs}`])
@@ -745,6 +708,7 @@ function renderOverview({modules, moduleGraph, callgraph, patterns, dataflow}) {
   const filesCount = (modules.imports || []).length;
   const patCount = (patterns.patterns || []).reduce((acc, p) => acc + ((p.patterns || []).length), 0);
   const dfCount = (dataflow.functions || []).length;
+  const routeCount = (routes?.routes || []).length;
 
   return el("div", {}, [
     pill,
@@ -754,6 +718,7 @@ function renderOverview({modules, moduleGraph, callgraph, patterns, dataflow}) {
       el("div", {class:"stat"}, [el("div", {class:"k"}, ["Calls"]), el("div", {class:"v"}, [String(callCount)])]),
       el("div", {class:"stat"}, [el("div", {class:"k"}, ["Module edges"]), el("div", {class:"v"}, [String(moduleEdges)])]),
       el("div", {class:"stat"}, [el("div", {class:"k"}, ["Pattern hits"]), el("div", {class:"v"}, [String(patCount)])]),
+      el("div", {class:"stat"}, [el("div", {class:"k"}, ["Routes"]), el("div", {class:"v"}, [String(routeCount)])]),
       el("div", {class:"stat"}, [el("div", {class:"k"}, ["Dataflow fns"]), el("div", {class:"v"}, [String(dfCount)])]),
     ])
   ]);
@@ -782,15 +747,14 @@ function renderGraphs() {
       wrap.appendChild(card);
     };
 
-    img.onerror = () => {
-      // Missing images are common if render step was disabled; ignore silently.
-    };
+    img.onerror = () => {};
   });
 
   return wrap;
 }
 
-function makeIndex({modules, callgraph, callgraphResolved, patterns, dataflow}) {
+// --- Index build ---
+function makeIndex({modules, callgraph, callgraphResolved, patterns, dataflow, routes}) {
   const files = (modules.imports || []).map(r => r.file).sort();
 
   const importsByFile = new Map();
@@ -839,6 +803,12 @@ function makeIndex({modules, callgraph, callgraphResolved, patterns, dataflow}) 
     callersByCallee.set(callee, out2);
   });
 
+  // Routes: store list + convenience searchable strings
+  const routeItems = (routes?.routes || []).map(r => ({
+    ...r,
+    display: `${r.http_method} ${r.path}`
+  }));
+
   return {
     files,
     importsByFile,
@@ -849,7 +819,8 @@ function makeIndex({modules, callgraph, callgraphResolved, patterns, dataflow}) 
     functions,
     functionMeta,
     calleesByCaller,
-    callersByCallee
+    callersByCallee,
+    routeItems,
   };
 }
 
@@ -866,6 +837,27 @@ function renderList(items, filterText, onSelect, selectedValue) {
     }, [x]));
   });
   return list;
+}
+
+function renderRouteDetails(route) {
+  return el("div", {}, [
+    el("div", {class:"section-title"}, ["Route"]),
+    el("pre", {class:"mono"}, [`${route.http_method} ${route.path}`]),
+
+    el("div", {class:"section-title"}, ["Handler"]),
+    el("pre", {class:"mono"}, [route.handler || ""]),
+
+    el("div", {class:"section-title"}, ["Controller / Router"]),
+    el("pre", {class:"mono"}, [
+      `controller=${route.controller || ""}\ncontroller_path=${route.controller_path || ""}\nrouter_path=${route.router_path || ""}`
+    ]),
+
+    el("div", {class:"section-title"}, ["File"]),
+    el("pre", {class:"mono"}, [route.file || ""]),
+
+    el("div", {class:"section-title"}, ["Auth (heuristic)"]),
+    route.auth ? el("pre", {class:"mono"}, [route.auth]) : el("div", {class:"muted"}, ["No auth metadata detected."]),
+  ]);
 }
 
 function renderFileDetails(file, index) {
@@ -1040,6 +1032,7 @@ function renderFunctionDetails(fn, index) {
 function setActiveTab(active) {
   document.getElementById("tabFiles").classList.toggle("active", active === "files");
   document.getElementById("tabFunctions").classList.toggle("active", active === "functions");
+  document.getElementById("tabRoutes").classList.toggle("active", active === "routes");
 }
 
 (async function main() {
@@ -1055,28 +1048,51 @@ function setActiveTab(active) {
     let callgraphResolved = null;
     try { callgraphResolved = await loadJson("callgraph_resolved.json"); } catch (e) {}
 
+    let routes = null;
+    try { routes = await loadJson("routes.json"); } catch (e) { routes = {framework:"unknown", routes:[], warnings:[]}; }
+
     clear(document.getElementById("overview"));
     document.getElementById("overview").appendChild(
-      renderOverview({modules, moduleGraph, callgraph, patterns, dataflow})
+      renderOverview({modules, moduleGraph, callgraph, patterns, dataflow, routes})
     );
 
     const graphsHost = document.getElementById("graphs");
     clear(graphsHost);
     graphsHost.appendChild(renderGraphs());
 
-    const index = makeIndex({modules, callgraph, callgraphResolved, patterns, dataflow});
+    const index = makeIndex({modules, callgraph, callgraphResolved, patterns, dataflow, routes});
 
     let mode = "files";
     let selectedFile = index.files[0] || null;
     let selectedFn = index.functions[0] || null;
+    let selectedRouteDisplay = (index.routeItems[0]?.display) || null;
 
-    function selectedValue() { return mode === "functions" ? selectedFn : selectedFile; }
-    function setSelected(v) { if (mode === "functions") selectedFn = v; else selectedFile = v; }
+    function selectedValue() {
+      if (mode === "functions") return selectedFn;
+      if (mode === "routes") return selectedRouteDisplay;
+      return selectedFile;
+    }
+
+    function setSelected(v) {
+      if (mode === "functions") selectedFn = v;
+      else if (mode === "routes") selectedRouteDisplay = v;
+      else selectedFile = v;
+    }
 
     function refreshList() {
       const q = document.getElementById("globalSearch").value || "";
       const host = document.getElementById("masterList");
       clear(host);
+
+      if (mode === "routes") {
+        const items = index.routeItems.map(r => r.display);
+        host.appendChild(renderList(items, q, (v) => {
+          setSelected(v);
+          refreshDetails();
+          refreshList();
+        }, selectedValue()));
+        return;
+      }
 
       const items = mode === "functions" ? index.functions : index.files;
 
@@ -1090,6 +1106,14 @@ function setActiveTab(active) {
     function refreshDetails() {
       const host = document.getElementById("details");
       clear(host);
+
+      if (mode === "routes") {
+        if (!selectedRouteDisplay) return host.appendChild(el("div", {class:"muted"}, ["No routes."]));
+        const route = index.routeItems.find(r => r.display === selectedRouteDisplay);
+        if (!route) return host.appendChild(el("div", {class:"muted"}, ["Route not found."]));
+        host.appendChild(renderRouteDetails(route));
+        return;
+      }
 
       if (mode === "functions") {
         if (!selectedFn) return host.appendChild(el("div", {class:"muted"}, ["No functions."]));
@@ -1109,9 +1133,17 @@ function setActiveTab(active) {
       refreshList();
       refreshDetails();
     });
+
     document.getElementById("tabFunctions").addEventListener("click", () => {
       mode = "functions";
       setActiveTab("functions");
+      refreshList();
+      refreshDetails();
+    });
+
+    document.getElementById("tabRoutes").addEventListener("click", () => {
+      mode = "routes";
+      setActiveTab("routes");
       refreshList();
       refreshDetails();
     });

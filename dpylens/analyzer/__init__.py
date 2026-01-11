@@ -1,1 +1,1 @@
-# Analyzer package
+"""dpylens analyzers package."""

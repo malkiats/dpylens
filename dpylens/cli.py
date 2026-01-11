@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import threading
 import time
 import webbrowser
@@ -19,6 +18,7 @@ from dpylens.analyzer.models import FileError, to_jsonable
 from dpylens.analyzer.modulegraph import build_module_graph, build_local_module_index
 from dpylens.analyzer.parser import parse_file_to_ast
 from dpylens.analyzer.patterns import detect_patterns
+from dpylens.analyzer.routes_litestar import analyze_litestar_routes
 from dpylens.analyzer.scanner import scan_python_files
 from dpylens.analyzer.visualize import (
     build_callgraph_dot,
@@ -38,6 +38,8 @@ def write_json(path: Path, payload: object) -> None:
 
 
 def analyze_project(root: Path, out: Path) -> tuple[int, list[FileError]]:
+    out.mkdir(parents=True, exist_ok=True)
+
     py_files = scan_python_files(root)
     errors: list[FileError] = []
 
@@ -83,6 +85,16 @@ def analyze_project(root: Path, out: Path) -> tuple[int, list[FileError]]:
         local_module_index=local_module_index,
     )
 
+    # --- NEW: routes extraction (best-effort; must not break analysis) ---
+    try:
+        rr = analyze_litestar_routes(root=root, out_dir=out)
+        # store warnings in a JSON file as well (routes.json already includes warnings)
+        # also record them in "errors" list in a non-fatal way
+        for w in rr.warnings:
+            errors.append(FileError(file="routes_litestar", error=w))
+    except Exception as e:  # noqa: BLE001
+        errors.append(FileError(file="routes_litestar", error=f"routes_analyzer_failed: {e}"))
+
     # JSON
     write_json(out / "modules.json", {"imports": to_jsonable(import_records), "errors": to_jsonable(errors)})
     write_json(
@@ -119,7 +131,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     print(f"Analyzed {nfiles} Python files.")
     print(f"Wrote JSON + DOT outputs to: {out}")
     if errors:
-        print(f"Warnings: {len(errors)} files failed to parse. See JSON output for details.")
+        print(f"Warnings: {len(errors)} issues (parse or analysis). See JSON output for details.")
     return 0
 
 
@@ -170,7 +182,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Analysis: {analysis_out}")
     print(f"Report: {report_out}")
     if errors:
-        print(f"Warnings: {len(errors)} files failed to parse. See analysis JSON output for details.")
+        print(f"Warnings: {len(errors)} issues (parse or analysis). See analysis JSON output for details.")
 
     if args.serve:
         port = int(args.port)
